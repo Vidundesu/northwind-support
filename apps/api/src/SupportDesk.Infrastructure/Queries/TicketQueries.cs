@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using SupportDesk.Application.Abstractions;
 using SupportDesk.Application.Contracts.Common;
 using SupportDesk.Application.Contracts.Tickets;
@@ -14,8 +15,15 @@ namespace SupportDesk.Infrastructure.Queries;
 /// Ticket reads. Projected in the database and never tracked. Aggregates hold only each
 /// other's ids, so the customer, category and agent labels are joined in here, on the read side.
 /// </summary>
-public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQueries
+/// <remarks>
+/// SLA derivation runs in the final projection after EF materializes its scalar inputs. If SLA
+/// filtering moves into SQL, translate and verify the domain threshold arithmetic explicitly;
+/// do not put a compiled delegate into an EF predicate.
+/// </remarks>
+public sealed class TicketQueries(SupportDbContext db, IClock clock, IConfiguration configuration) : ITicketQueries
 {
+    private readonly int _atRiskThresholdPercent = ReadAtRiskThreshold(configuration);
+
     /// <remarks>
     /// Filters, counts, sorts and pages in that order, all in the database, so the count and the
     /// page always describe the same filtered set.
@@ -45,7 +53,9 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQu
                 UpdatedAtUtc = x.Ticket.UpdatedAtUtc,
                 DueAtUtc = x.Ticket.DueAtUtc,
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
-                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, now)
+                SlaStatus = SlaEvaluator.Evaluate(
+                    x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, x.Ticket.Status,
+                    x.Ticket.SlaWindowSeconds, now, _atRiskThresholdPercent)
             })
             .ToListAsync(ct);
 
@@ -74,7 +84,9 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQu
                 UpdatedAtUtc = x.Ticket.UpdatedAtUtc,
                 DueAtUtc = x.Ticket.DueAtUtc,
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
-                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, now)
+                SlaStatus = SlaEvaluator.Evaluate(
+                    x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, x.Ticket.Status,
+                    x.Ticket.SlaWindowSeconds, now, _atRiskThresholdPercent)
             })
             .FirstOrDefaultAsync(ct);
     }
@@ -101,7 +113,9 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQu
                 UpdatedAtUtc = x.Ticket.UpdatedAtUtc,
                 DueAtUtc = x.Ticket.DueAtUtc,
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
-                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, now)
+                SlaStatus = SlaEvaluator.Evaluate(
+                    x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, x.Ticket.Status,
+                    x.Ticket.SlaWindowSeconds, now, _atRiskThresholdPercent)
             })
             .ToListAsync(ct);
     }
@@ -206,5 +220,17 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQu
         public required Category Category { get; init; }
 
         public Agent? Agent { get; init; }
+    }
+
+    private static int ReadAtRiskThreshold(IConfiguration configuration)
+    {
+        var value = configuration["Sla:AtRiskThresholdPercent"];
+        if (!int.TryParse(value, out var threshold) || threshold is < 1 or > 100)
+        {
+            throw new InvalidOperationException(
+                "Configuration 'Sla:AtRiskThresholdPercent' must be a whole percentage from 1 through 100.");
+        }
+
+        return threshold;
     }
 }
