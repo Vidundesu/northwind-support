@@ -99,4 +99,50 @@ public class TicketTests
         Assert.Null(ticket.AssignedAgentId);
         Assert.Equal(Later, ticket.UpdatedAtUtc);
     }
+
+    [Fact]
+    public void SetInitialSlaWindow_SetsDurationAndDueDateFromCreation()
+    {
+        var ticket = new TicketBuilder().Build();
+
+        ticket.SetInitialSlaWindow(3600, Later);
+
+        Assert.Equal(3600, ticket.SlaWindowSeconds);
+        Assert.Equal(ticket.CreatedAtUtc.AddSeconds(3600), ticket.DueAtUtc);
+        Assert.Equal(Later, ticket.UpdatedAtUtc);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void SetInitialSlaWindow_RejectsNonPositiveWindows(int windowSeconds)
+    {
+        var ticket = new TicketBuilder().Build();
+
+        Assert.Throws<BusinessRuleViolationException>(() => ticket.SetInitialSlaWindow(windowSeconds, Later));
+        Assert.Null(ticket.SlaWindowSeconds);
+        Assert.Null(ticket.DueAtUtc);
+    }
+
+    [Fact]
+    public void SetInitialSlaWindow_CannotReplaceTheOriginalWindowAndUnrelatedChangesRetainIt()
+    {
+        var ticket = new TicketBuilder().Build();
+        ticket.SetInitialSlaWindow(3600, Later);
+
+        ticket.AssignTo(7, Later.AddMinutes(1));
+
+        Assert.Equal(3600, ticket.SlaWindowSeconds);
+        Assert.Equal(ticket.CreatedAtUtc.AddSeconds(3600), ticket.DueAtUtc);
+        Assert.Throws<BusinessRuleViolationException>(() => ticket.SetInitialSlaWindow(7200, Later));
+        Assert.Equal(3600, ticket.SlaWindowSeconds);
+    }
+
+    [Fact]
+    public void Raise_LeavesUnknownSlaWindowNull()
+    {
+        var ticket = new TicketBuilder().Build();
+
+        Assert.Null(ticket.SlaWindowSeconds);
+    }
 }

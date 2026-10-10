@@ -43,6 +43,9 @@ public sealed class Ticket : AggregateRoot
     /// <summary>When the team has committed to responding by. Null when no SLA applies.</summary>
     public DateTime? DueAtUtc { get; private set; }
 
+    /// <summary>The original response window in seconds, when one has been established.</summary>
+    public int? SlaWindowSeconds { get; private set; }
+
     public DateTime? ResolvedAtUtc { get; private set; }
 
     /// <summary>True while the ticket still needs work from an agent.</summary>
@@ -109,6 +112,38 @@ public sealed class Ticket : AggregateRoot
     public void AssignTo(int? agentId, DateTime nowUtc)
     {
         AssignedAgentId = agentId;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    /// <summary>
+    /// Sets the original SLA window when the team first commits to a response time.
+    /// The due date is anchored to ticket creation and this value cannot be replaced later.
+    /// </summary>
+    /// <exception cref="BusinessRuleViolationException">The window is invalid or already set.</exception>
+    public void SetInitialSlaWindow(int windowSeconds, DateTime nowUtc)
+    {
+        if (windowSeconds <= 0)
+        {
+            throw new BusinessRuleViolationException("An SLA window must be a positive number of seconds.");
+        }
+
+        if (SlaWindowSeconds is not null)
+        {
+            throw new BusinessRuleViolationException($"Ticket {Reference} already has an SLA window.");
+        }
+
+        DateTime dueAtUtc;
+        try
+        {
+            dueAtUtc = CreatedAtUtc.AddSeconds(windowSeconds);
+        }
+        catch (ArgumentOutOfRangeException exception)
+        {
+            throw new BusinessRuleViolationException($"The SLA window is outside the supported date range: {exception.Message}");
+        }
+
+        SlaWindowSeconds = windowSeconds;
+        DueAtUtc = dueAtUtc;
         UpdatedAtUtc = nowUtc;
     }
 }

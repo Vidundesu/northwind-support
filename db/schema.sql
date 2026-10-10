@@ -100,6 +100,7 @@ CREATE TABLE dbo.Tickets
     CreatedAtUtc    DATETIME2(3)    NOT NULL CONSTRAINT DF_Tickets_CreatedAtUtc DEFAULT (SYSUTCDATETIME()),
     UpdatedAtUtc    DATETIME2(3)    NOT NULL CONSTRAINT DF_Tickets_UpdatedAtUtc DEFAULT (SYSUTCDATETIME()),
     DueAtUtc        DATETIME2(3)    NULL,
+    SlaWindowSeconds INT            NULL,
     ResolvedAtUtc   DATETIME2(3)    NULL,
     CONSTRAINT UQ_Tickets_Reference UNIQUE (Reference),
     CONSTRAINT FK_Tickets_Customers FOREIGN KEY (CustomerId)  REFERENCES dbo.Customers (Id),
