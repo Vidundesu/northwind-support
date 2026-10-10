@@ -1,5 +1,6 @@
 using SupportDesk.Domain.Aggregates.Tickets;
 using SupportDesk.Domain.Exceptions;
+using SupportDesk.Domain.Policies.Tickets;
 using SupportDesk.UnitTests.TestDoubles;
 
 namespace SupportDesk.UnitTests.Domain.Aggregates.Tickets;
@@ -145,4 +146,55 @@ public class TicketTests
 
         Assert.Null(ticket.SlaWindowSeconds);
     }
+
+    [Fact]
+    public void ApplyInitialTriage_AppliesPriorityWindowDueDateAndSelectedAgent()
+    {
+        var ticket = new TicketBuilder().Build();
+        var decision = Decision(TicketPriority.High, TimeSpan.FromHours(8), FixedClock.DefaultNow, 12, "Agent 12");
+
+        ticket.ApplyInitialTriage(decision, FixedClock.DefaultNow);
+
+        Assert.Equal(TicketPriority.High, ticket.Priority);
+        Assert.Equal(8 * 60 * 60, ticket.SlaWindowSeconds);
+        Assert.Equal(FixedClock.DefaultNow.AddHours(8), ticket.DueAtUtc);
+        Assert.Equal(12, ticket.AssignedAgentId);
+    }
+
+    [Fact]
+    public void ApplyEscalationDecision_RecalculatesDueDateButRetainsOriginalSlaWindow()
+    {
+        var ticket = new TicketBuilder().WithPriority(TicketPriority.Medium).AssignedTo(3).Build();
+        ticket.SetInitialSlaWindow(3600, FixedClock.DefaultNow);
+        var decision = Decision(TicketPriority.High, TimeSpan.FromHours(8), Later, 7, "Agent 7");
+
+        ticket.ApplyEscalationDecision(decision, Later);
+
+        Assert.Equal(TicketPriority.High, ticket.Priority);
+        Assert.Equal(7, ticket.AssignedAgentId);
+        Assert.Equal(Later.AddHours(8), ticket.DueAtUtc);
+        Assert.Equal(3600, ticket.SlaWindowSeconds);
+        Assert.Equal(Later, ticket.UpdatedAtUtc);
+    }
+
+    [Fact]
+    public void ApplyEscalationDecision_RejectsSkippingPriorityLevels()
+    {
+        var ticket = new TicketBuilder().WithPriority(TicketPriority.Low).Build();
+        var decision = Decision(TicketPriority.High, TimeSpan.FromHours(8), Later, null, null);
+
+        Assert.Throws<BusinessRuleViolationException>(() => ticket.ApplyEscalationDecision(decision, Later));
+        Assert.Equal(TicketPriority.Low, ticket.Priority);
+    }
+
+    private static TriageDecision Decision(
+        TicketPriority priority,
+        TimeSpan window,
+        DateTime decisionTimeUtc,
+        int? agentId,
+        string? agentName) => TriageDecision.Create(
+            new PriorityDecision(priority, $"Applied {priority} priority."),
+            new SlaWindow(window, $"Configured {priority} SLA window."),
+            new AgentAssignmentDecision(agentId, agentName, "Assignment policy result."),
+            decisionTimeUtc);
 }
