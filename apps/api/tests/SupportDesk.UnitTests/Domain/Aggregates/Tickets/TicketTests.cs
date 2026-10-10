@@ -109,6 +109,7 @@ public class TicketTests
         ticket.SetInitialSlaWindow(3600, Later);
 
         Assert.Equal(3600, ticket.SlaWindowSeconds);
+        Assert.Equal(3600, ticket.ActiveSlaWindowSeconds);
         Assert.Equal(ticket.CreatedAtUtc.AddSeconds(3600), ticket.DueAtUtc);
         Assert.Equal(Later, ticket.UpdatedAtUtc);
     }
@@ -134,6 +135,7 @@ public class TicketTests
         ticket.AssignTo(7, Later.AddMinutes(1));
 
         Assert.Equal(3600, ticket.SlaWindowSeconds);
+        Assert.Equal(3600, ticket.ActiveSlaWindowSeconds);
         Assert.Equal(ticket.CreatedAtUtc.AddSeconds(3600), ticket.DueAtUtc);
         Assert.Throws<BusinessRuleViolationException>(() => ticket.SetInitialSlaWindow(7200, Later));
         Assert.Equal(3600, ticket.SlaWindowSeconds);
@@ -174,6 +176,7 @@ public class TicketTests
         Assert.Equal(7, ticket.AssignedAgentId);
         Assert.Equal(Later.AddHours(8), ticket.DueAtUtc);
         Assert.Equal(3600, ticket.SlaWindowSeconds);
+        Assert.Equal(8 * 3600, ticket.ActiveSlaWindowSeconds);
         Assert.Equal(Later, ticket.UpdatedAtUtc);
     }
 

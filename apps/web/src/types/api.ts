@@ -79,6 +79,34 @@ export interface TicketDetail {
   dueAtUtc: string | null;
   resolvedAtUtc: string | null;
   slaStatus: SlaStatus;
+  triage?: TriageSummary | null;
+}
+
+export interface TriageSummary {
+  appliedPriority: TicketPriority;
+  priorityReason: string;
+  slaWindowHours: number;
+  slaReason: string;
+  assignmentReason: string;
+}
+
+export interface TicketEscalation {
+  id: number;
+  ticketId: number;
+  fromPriority: TicketPriority;
+  toPriority: TicketPriority;
+  fromAgent: AgentSummary | null;
+  toAgent: AgentSummary | null;
+  fromDueAtUtc: string | null;
+  toDueAtUtc: string;
+  reason: string;
+  escalatedBy: string;
+  escalatedAtUtc: string;
+}
+
+export interface EscalationResult {
+  ticket: TicketDetail;
+  escalation: TicketEscalation;
 }
 
 /** Everything the ticket list screen can narrow the results by. */
@@ -90,6 +118,7 @@ export interface TicketFilters {
   customerId?: number;
   assignedAgentId?: number;
   unassignedOnly?: boolean;
+  slaStatus?: SlaStatus;
   page: number;
   pageSize: number;
   sortBy: TicketSortField;

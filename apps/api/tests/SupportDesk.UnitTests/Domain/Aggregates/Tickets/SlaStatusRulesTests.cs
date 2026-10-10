@@ -1,4 +1,5 @@
 using SupportDesk.Domain.Aggregates.Tickets;
+using SupportDesk.Domain.Policies.Tickets;
 using SupportDesk.UnitTests.TestDoubles;
 
 namespace SupportDesk.UnitTests.Domain.Aggregates.Tickets;
@@ -60,6 +61,26 @@ public sealed class SlaStatusRulesTests
         var ticket = TicketWithWindow(Now.AddHours(1));
 
         Assert.Equal(SlaStatus.AtRisk, SlaStatusRules.Derive(ticket, Now.AddHours(1), DefaultThresholdPercent));
+    }
+
+    [Fact]
+    public void Derive_AfterEscalation_UsesActiveWindowAndPreservesOriginalWindow()
+    {
+        var ticket = new TicketBuilder().WithPriority(TicketPriority.High).Build();
+        ticket.SetInitialSlaWindow(8 * 60 * 60, Now);
+        var escalationAt = Now.AddHours(1);
+        var decision = TriageDecision.Create(
+            new PriorityDecision(TicketPriority.Critical, "Escalated."),
+            new SlaWindow(TimeSpan.FromHours(4), "Critical base window."),
+            new AgentAssignmentDecision(null, null, "No eligible agent."),
+            escalationAt);
+
+        ticket.ApplyEscalationDecision(decision, escalationAt);
+
+        Assert.Equal(8 * 60 * 60, ticket.SlaWindowSeconds);
+        Assert.Equal(4 * 60 * 60, ticket.ActiveSlaWindowSeconds);
+        Assert.Equal(SlaStatus.WithinSla,
+            SlaStatusRules.Derive(ticket, escalationAt.AddHours(2.5), 25));
     }
 
     [Fact]

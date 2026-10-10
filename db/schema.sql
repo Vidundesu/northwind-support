@@ -6,8 +6,8 @@
    migrations in src/Infrastructure/Migrations must produce an equivalent
    schema.
 
-   The TicketEscalations table is intentionally NOT here — creating it is
-   part of the assignment, via an EF Core migration.
+   TicketEscalations and the active SLA duration are included in the reference
+   schema and are also produced by the ordered EF Core migrations.
    ===================================================================== */
 
 IF DB_ID('SupportDesk') IS NULL
@@ -101,6 +101,7 @@ CREATE TABLE dbo.Tickets
     UpdatedAtUtc    DATETIME2(3)    NOT NULL CONSTRAINT DF_Tickets_UpdatedAtUtc DEFAULT (SYSUTCDATETIME()),
     DueAtUtc        DATETIME2(3)    NULL,
     SlaWindowSeconds INT            NULL,
+    ActiveSlaWindowSeconds INT       NULL,
     ResolvedAtUtc   DATETIME2(3)    NULL,
     CONSTRAINT UQ_Tickets_Reference UNIQUE (Reference),
     CONSTRAINT FK_Tickets_Customers FOREIGN KEY (CustomerId)  REFERENCES dbo.Customers (Id),
@@ -109,6 +110,31 @@ CREATE TABLE dbo.Tickets
     CONSTRAINT CK_Tickets_Priority CHECK (Priority BETWEEN 1 AND 4),
     CONSTRAINT CK_Tickets_Status   CHECK (Status   BETWEEN 1 AND 5)
 );
+GO
+
+CREATE TABLE dbo.TicketEscalations
+(
+    Id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_TicketEscalations PRIMARY KEY,
+    TicketId INT NOT NULL,
+    FromPriority INT NOT NULL,
+    ToPriority INT NOT NULL,
+    FromAgentId INT NULL,
+    ToAgentId INT NULL,
+    FromDueAtUtc DATETIME2(3) NULL,
+    ToDueAtUtc DATETIME2(3) NOT NULL,
+    Reason NVARCHAR(500) NOT NULL,
+    EscalatedBy NVARCHAR(100) NOT NULL,
+    EscalatedAtUtc DATETIME2(3) NOT NULL,
+    CONSTRAINT FK_TicketEscalations_Tickets_TicketId FOREIGN KEY (TicketId) REFERENCES dbo.Tickets (Id),
+    CONSTRAINT FK_TicketEscalations_Agents_FromAgentId FOREIGN KEY (FromAgentId) REFERENCES dbo.Agents (Id),
+    CONSTRAINT FK_TicketEscalations_Agents_ToAgentId FOREIGN KEY (ToAgentId) REFERENCES dbo.Agents (Id)
+);
+GO
+
+CREATE INDEX IX_TicketEscalations_TicketId_EscalatedAtUtc_Id
+    ON dbo.TicketEscalations (TicketId, EscalatedAtUtc DESC, Id DESC);
+CREATE INDEX IX_TicketEscalations_FromAgentId ON dbo.TicketEscalations (FromAgentId);
+CREATE INDEX IX_TicketEscalations_ToAgentId ON dbo.TicketEscalations (ToAgentId);
 GO
 
 /* Indexes that support the list screen's filters and sorts. */

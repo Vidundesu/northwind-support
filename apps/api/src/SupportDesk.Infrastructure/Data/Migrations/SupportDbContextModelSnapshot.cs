@@ -158,6 +158,9 @@ namespace SupportDesk.Infrastructure.Data.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("ActiveSlaWindowSeconds")
+                        .HasColumnType("int");
+
                     b.Property<int?>("AssignedAgentId")
                         .HasColumnType("int");
 
@@ -235,6 +238,61 @@ namespace SupportDesk.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SupportDesk.Domain.Aggregates.Tickets.TicketEscalation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("EscalatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("EscalatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int?>("FromAgentId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("FromDueAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("FromPriority")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("TicketId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ToAgentId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("ToDueAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("ToPriority")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FromAgentId");
+
+                    b.HasIndex("ToAgentId");
+
+                    b.HasIndex("TicketId", "EscalatedAtUtc", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("IX_TicketEscalations_TicketId_EscalatedAtUtc_Id");
+
+                    b.ToTable("TicketEscalations", (string)null);
+                });
+
             modelBuilder.Entity("SupportDesk.Domain.Aggregates.Agents.AgentSpecialization", b =>
                 {
                     b.HasOne("SupportDesk.Domain.Aggregates.Agents.Agent", null)
@@ -268,6 +326,25 @@ namespace SupportDesk.Infrastructure.Data.Migrations
                         .HasForeignKey("CustomerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("SupportDesk.Domain.Aggregates.Tickets.TicketEscalation", b =>
+                {
+                    b.HasOne("SupportDesk.Domain.Aggregates.Agents.Agent", null)
+                        .WithMany()
+                        .HasForeignKey("FromAgentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("SupportDesk.Domain.Aggregates.Tickets.Ticket", null)
+                        .WithMany()
+                        .HasForeignKey("TicketId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SupportDesk.Domain.Aggregates.Agents.Agent", null)
+                        .WithMany()
+                        .HasForeignKey("ToAgentId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("SupportDesk.Domain.Aggregates.Agents.Agent", b =>

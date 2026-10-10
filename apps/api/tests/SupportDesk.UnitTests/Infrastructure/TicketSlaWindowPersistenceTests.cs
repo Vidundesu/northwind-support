@@ -37,6 +37,7 @@ public sealed class TicketSlaWindowPersistenceTests
         await using (var db = new SupportDbContext(options))
         {
             Assert.Equal(900, (await db.Set<Ticket>().SingleAsync(t => t.Id == knownId)).SlaWindowSeconds);
+            Assert.Equal(900, (await db.Set<Ticket>().SingleAsync(t => t.Id == knownId)).ActiveSlaWindowSeconds);
             Assert.Null((await db.Set<Ticket>().SingleAsync(t => t.Id == unknownId)).SlaWindowSeconds);
         }
     }

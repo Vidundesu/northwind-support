@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using SupportDesk.Application.Abstractions;
@@ -30,11 +31,13 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock, IConfigurat
     /// </remarks>
     public async Task<PagedResult<TicketListItemDto>> GetPagedAsync(TicketQuery query, CancellationToken ct)
     {
-        var tickets = ApplyFilters(TicketsWithLabels(), query);
+        var now = clock.UtcNow;
+        var slaFilter = query.SlaStatus is { } status
+            ? SlaStatusRules.CreatePredicate(status, now, _atRiskThresholdPercent)
+            : null;
+        var tickets = ApplyFilters(TicketsWithLabels(slaFilter), query);
 
         var totalCount = await tickets.CountAsync(ct);
-
-        var now = clock.UtcNow;
 
         var items = await ApplySort(tickets, query)
             .Skip((query.Page - 1) * query.PageSize)
@@ -55,7 +58,7 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock, IConfigurat
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
                 SlaStatus = SlaEvaluator.Evaluate(
                     x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, x.Ticket.Status,
-                    x.Ticket.SlaWindowSeconds, now, _atRiskThresholdPercent)
+                    x.Ticket.ActiveSlaWindowSeconds ?? x.Ticket.SlaWindowSeconds, now, _atRiskThresholdPercent)
             })
             .ToListAsync(ct);
 
@@ -86,7 +89,7 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock, IConfigurat
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
                 SlaStatus = SlaEvaluator.Evaluate(
                     x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, x.Ticket.Status,
-                    x.Ticket.SlaWindowSeconds, now, _atRiskThresholdPercent)
+                    x.Ticket.ActiveSlaWindowSeconds ?? x.Ticket.SlaWindowSeconds, now, _atRiskThresholdPercent)
             })
             .FirstOrDefaultAsync(ct);
     }
@@ -115,20 +118,41 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock, IConfigurat
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
                 SlaStatus = SlaEvaluator.Evaluate(
                     x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, x.Ticket.Status,
-                    x.Ticket.SlaWindowSeconds, now, _atRiskThresholdPercent)
+                    x.Ticket.ActiveSlaWindowSeconds ?? x.Ticket.SlaWindowSeconds, now, _atRiskThresholdPercent)
             })
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<TicketEscalationDto>> GetEscalationsAsync(int ticketId, CancellationToken ct) =>
+        await (from escalation in db.Set<TicketEscalation>().AsNoTracking()
+               where escalation.TicketId == ticketId
+               join fromAgentRow in db.Set<Agent>() on escalation.FromAgentId equals fromAgentRow.Id into fromAgents
+               from fromAgent in fromAgents.DefaultIfEmpty()
+               join toAgentRow in db.Set<Agent>() on escalation.ToAgentId equals toAgentRow.Id into toAgents
+               from toAgent in toAgents.DefaultIfEmpty()
+               orderby escalation.EscalatedAtUtc descending, escalation.Id descending
+               select new TicketEscalationDto(
+                   escalation.Id, escalation.TicketId, escalation.FromPriority, escalation.ToPriority,
+                   fromAgent == null ? null : new AgentSummaryDto(fromAgent.Id, fromAgent.FullName),
+                   toAgent == null ? null : new AgentSummaryDto(toAgent.Id, toAgent.FullName),
+                   escalation.FromDueAtUtc, escalation.ToDueAtUtc, escalation.Reason,
+                   escalation.EscalatedBy, escalation.EscalatedAtUtc))
+            .ToListAsync(ct);
+
     /// <summary>
     /// Every ticket with the rows that label it. Filter and sort this, then project.
     /// </summary>
-    private IQueryable<TicketWithLabels> TicketsWithLabels() =>
-        from ticket in db.Set<Ticket>().AsNoTracking()
+    private IQueryable<TicketWithLabels> TicketsWithLabels(Expression<Func<Ticket, bool>>? slaFilter = null)
+    {
+        var source = db.Set<Ticket>().AsNoTracking();
+        if (slaFilter is not null) source = source.Where(slaFilter);
+        return
+        from ticket in source
         join customer in db.Set<Customer>() on ticket.CustomerId equals customer.Id
         join category in db.Set<Category>() on ticket.CategoryId equals category.Id
         from agent in db.Set<Agent>().Where(a => a.Id == ticket.AssignedAgentId).DefaultIfEmpty()
         select new TicketWithLabels { Ticket = ticket, Customer = customer, Category = category, Agent = agent };
+    }
 
     /// <summary>
     /// Narrows the list to the supplied filters, combined with AND. Everything here stays an

@@ -75,6 +75,23 @@ public sealed class TicketQueriesFilterTests : IDisposable
     }
 
     [Fact]
+    public async Task Sla_status_filter_runs_before_count_and_uses_the_active_window()
+    {
+        var atRisk = Ticket("TCK-RISK").Build();
+        atRisk.SetInitialSlaWindow(3600, _clock.UtcNow);
+        var within = Ticket("TCK-WITHIN").Build();
+        within.SetInitialSlaWindow(8 * 3600, _clock.UtcNow);
+        _db.AddRange(atRisk, within);
+        await _db.SaveChangesAsync();
+        _clock.Advance(TimeSpan.FromMinutes(46));
+
+        var result = await Query(new TicketQuery { SlaStatus = SlaStatus.AtRisk });
+
+        Assert.Equal(1, result.TotalCount);
+        Assert.Equal("TCK-RISK", Assert.Single(result.Items).Reference);
+    }
+
+    [Fact]
     public async Task Filters_combine_with_AND()
     {
         Add(Ticket("TCK-0001").ForCustomer(_contoso.Id).WithPriority(TicketPriority.High).WithStatus(TicketStatus.InProgress));

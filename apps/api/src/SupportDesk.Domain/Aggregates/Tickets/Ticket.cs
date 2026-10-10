@@ -47,6 +47,9 @@ public sealed class Ticket : AggregateRoot
     /// <summary>The original response window in seconds, when one has been established.</summary>
     public int? SlaWindowSeconds { get; private set; }
 
+    /// <summary>The duration associated with the currently active due date.</summary>
+    public int? ActiveSlaWindowSeconds { get; private set; }
+
     public DateTime? ResolvedAtUtc { get; private set; }
 
     /// <summary>True while the ticket still needs work from an agent.</summary>
@@ -144,6 +147,7 @@ public sealed class Ticket : AggregateRoot
         }
 
         SlaWindowSeconds = windowSeconds;
+        ActiveSlaWindowSeconds = windowSeconds;
         DueAtUtc = dueAtUtc;
         UpdatedAtUtc = nowUtc;
     }
@@ -167,6 +171,7 @@ public sealed class Ticket : AggregateRoot
         Priority = decision.Priority;
         AssignedAgentId = decision.AssignedAgentId;
         SlaWindowSeconds = decision.SlaWindowSeconds;
+        ActiveSlaWindowSeconds = decision.SlaWindowSeconds;
         DueAtUtc = decision.DueAtUtc;
         UpdatedAtUtc = nowUtc;
     }
@@ -210,6 +215,7 @@ public sealed class Ticket : AggregateRoot
         Priority = decision.Priority;
         AssignedAgentId = decision.AssignedAgentId;
         DueAtUtc = decision.DueAtUtc;
+        ActiveSlaWindowSeconds = decision.SlaWindowSeconds;
         UpdatedAtUtc = escalatedAtUtc;
     }
 }
