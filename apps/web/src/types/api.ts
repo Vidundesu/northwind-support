@@ -179,3 +179,21 @@ export interface ProblemDetails {
   traceId?: string;
   errors?: Record<string, string[]>;
 }
+
+/** The signed-in agent, as returned by POST /api/auth/login and GET /api/auth/me. */
+export interface AuthUser {
+  id: number;
+  fullName: string;
+  email: string;
+}
+
+export interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  accessToken: string;
+  expiresAtUtc: string;
+  user: AuthUser;
+}

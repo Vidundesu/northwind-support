@@ -102,7 +102,7 @@ Errors are `ProblemDetails`: `400` validation, `404` not found, `409` conflict o
 **Seed data:** 5 categories, 6 customers (3 Premium), 6 agents (one inactive, one at their limit)
 and 40 tickets across every status, priority and SLA state.
 
-### Task 3 — backend authentication (Phase 2)
+### Task 3 — authentication
 
 - The six existing agents are the login identities. The documented development password is
   `DemoOnly!ChangeMe2026` for seeded agents; Yuki Tanaka is inactive and cannot authenticate.
@@ -117,7 +117,24 @@ and 40 tickets across every status, priority and SLA state.
 - Access tokens expire after 60 minutes. JWT issuer/audience/expiry are configured in application
   settings; the development signing key is explicitly development-only. In non-Development environments,
   provide `Authentication__Jwt__SigningKey` through the process environment with a random secret of at
-  least 32 UTF-8 bytes. The login/session UI and client token handling are Phase 3 work.
+  least 32 UTF-8 bytes. 
+
+#### Web client (AU-9 to AU-13)
+
+- `/login` has labelled fields, client validation (email format, password required), a pending
+  state and one generic error for rejected credentials (the API's own message is shown).
+- **Token storage:** `sessionStorage` (`northwind.session`: token, expiry, user). It survives a
+  refresh but not closing the tab, and is not shared between tabs. Trade-off: any script running on
+  the page (XSS) can read it, which an `HttpOnly` cookie would prevent, at the cost of CSRF handling
+  and a cookie-issuing backend. In-memory only would be safer still but signs the agent out on every refresh.
+- `apps/web/src/api/client.ts` attaches `Authorization: Bearer <token>` to every call. Login opts
+  out (`anonymous: true`) so a wrong password is a form error, not a "session expired".
+- A 401 on an authenticated call clears the session; the session store is observable, so
+  `RequireAuth` re-renders and redirects to `/login` without the API layer knowing about routing.
+  A timer also signs the agent out when the token expires.
+- `RequireAuth` guards every route except `/login` and remembers the requested location; after
+  sign-in the agent lands there (same-site paths only), otherwise on `/tickets`.
+- The header shows the signed-in agent's name and a **Log out** button that clears the session.
 
 ### Task 2 decisions
 
