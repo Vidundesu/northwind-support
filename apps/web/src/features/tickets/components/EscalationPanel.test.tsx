@@ -22,7 +22,6 @@ describe('EscalationPanel', () => {
     const updated = vi.fn();
     render(<EscalationPanel ticket={ticket} onUpdated={updated} />);
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'bad' } });
-    fireEvent.change(screen.getByLabelText('Escalated by'), { target: { value: 'lead' } });
     fireEvent.click(screen.getByRole('button', { name: 'Escalate ticket' }));
     expect(await screen.findByText('Enter a reason between 5 and 500 characters.')).toBeInTheDocument();
     expect(ticketsApi.escalate).not.toHaveBeenCalled();
@@ -34,7 +33,6 @@ describe('EscalationPanel', () => {
     vi.mocked(ticketsApi.escalate).mockRejectedValue(new ApiError(409, 'Critical tickets cannot be escalated.'));
     render(<EscalationPanel ticket={ticket} onUpdated={updated} />);
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Customer impact is severe.' } });
-    fireEvent.change(screen.getByLabelText('Escalated by'), { target: { value: 'lead' } });
     fireEvent.click(screen.getByRole('button', { name: 'Escalate ticket' }));
     expect(await screen.findByText(/Escalation was rejected: Critical tickets cannot be escalated/)).toBeInTheDocument();
     expect(updated).not.toHaveBeenCalled();

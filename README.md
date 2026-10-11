@@ -88,6 +88,8 @@ Both pass on a clean checkout and neither needs a database.
 | Endpoint | Description |
 | --- | --- |
 | `GET /api/tickets` | Paged list with database-side `search`, `status`, `priority`, `categoryId`, `customerId`, `assignedAgentId`, `unassignedOnly`, `slaStatus`, `sortBy`, `sortDirection`. |
+| `POST /api/auth/login` | Validates an active seeded agent and issues a signed JWT. |
+| `GET /api/auth/me` | Returns the current agent from the validated token. |
 | `GET /api/tickets/{id}` | One ticket |
 | `POST /api/tickets` | Create and automatically triage a ticket |
 | `POST /api/tickets/{id}/escalate` | Escalate one priority level and record the actor and reason |
@@ -99,6 +101,40 @@ Errors are `ProblemDetails`: `400` validation, `404` not found, `409` conflict o
 
 **Seed data:** 5 categories, 6 customers (3 Premium), 6 agents (one inactive, one at their limit)
 and 40 tickets across every status, priority and SLA state.
+
+### Task 3 — authentication
+
+- The six existing agents are the login identities. The documented development password is
+  `DemoOnly!ChangeMe2026` for seeded agents; Yuki Tanaka is inactive and cannot authenticate.
+- Passwords are stored as ASP.NET Core Identity `PasswordHasher<Agent>` hashes. Salt generation and
+  verification are handled by the framework; plaintext passwords are not written to the database.
+  The API seeder generates hashes at runtime and backfills empty hashes on existing development data.
+- `POST /api/auth/login` returns a signed JWT, expiry, and agent identity. Invalid email and password
+  share the same generic `401` response. `GET /api/auth/me` returns the validated token identity.
+- A fallback authorization policy protects API endpoints centrally. Login is explicitly anonymous;
+  Swagger remains available. Escalation history uses the authenticated agent name, never the caller's
+  submitted actor string.
+- Access tokens expire after 60 minutes. JWT issuer/audience/expiry are configured in application
+  settings; the development signing key is explicitly development-only. In non-Development environments,
+  provide `Authentication__Jwt__SigningKey` through the process environment with a random secret of at
+  least 32 UTF-8 bytes. 
+
+#### Web client (AU-9 to AU-13)
+
+- `/login` has labelled fields, client validation (email format, password required), a pending
+  state and one generic error for rejected credentials (the API's own message is shown).
+- **Token storage:** `sessionStorage` (`northwind.session`: token, expiry, user). It survives a
+  refresh but not closing the tab, and is not shared between tabs. Trade-off: any script running on
+  the page (XSS) can read it, which an `HttpOnly` cookie would prevent, at the cost of CSRF handling
+  and a cookie-issuing backend. In-memory only would be safer still but signs the agent out on every refresh.
+- `apps/web/src/api/client.ts` attaches `Authorization: Bearer <token>` to every call. Login opts
+  out (`anonymous: true`) so a wrong password is a form error, not a "session expired".
+- A 401 on an authenticated call clears the session; the session store is observable, so
+  `RequireAuth` re-renders and redirects to `/login` without the API layer knowing about routing.
+  A timer also signs the agent out when the token expires.
+- `RequireAuth` guards every route except `/login` and remembers the requested location; after
+  sign-in the agent lands there (same-site paths only), otherwise on `/tickets`.
+- The header shows the signed-in agent's name and a **Log out** button that clears the session.
 
 ### Task 2 decisions
 
@@ -112,9 +148,26 @@ and 40 tickets across every status, priority and SLA state.
   Ties use the lowest agent id; an eligible current owner is retained during escalation.
 - `TicketEscalations` uses a composite `(TicketId, EscalatedAtUtc DESC, Id DESC)` index for the
   newest-first history lookup. Ticket and optional agent references use restrictive deletes.
-- Until Task 3 supplies an authenticated identity, escalation requests send `escalatedBy` in the
-  body as the assessment specifies. No authentication behavior is included here.
+- Escalation history records the authenticated agent name from the JWT claims; the API and UI no longer accept an actor name supplied by the caller.
 - The optional SLA summary report is not implemented.
+
+### Task 3 — error contract and known limitations
+
+- **Error shape:** every failure is a JSON problem document with a `traceId`: `400` validation
+  (`errors` per field), `401` missing/invalid/expired token or bad login, `404` unknown ticket,
+  `409` Critical or Resolved/Closed escalation, `500` generic. A missing or invalid token also gets
+  this body (JwtBearer's default is an empty 401), so clients parse one error shape.
+- **Login failures:** wrong email, wrong password, inactive agent, blank fields and oversized
+  input (email over 254 or password over 128 characters) all return the same `401` and message.
+  An unknown email still does one password hash, so response time does not reveal which emails exist.
+  Blank fields are `401`, not `400`: the response must not hint which half was wrong.
+- **Escalation reason:** validated at the API edge by `EscalateTicketRequestValidator` (400 with a
+  `Reason` field error); the handler repeats the check so it is safe when called directly.
+- **Swagger:** an Authorize button accepts the token from `POST /api/auth/login`.
+- **Known limitations:** a token stays valid for up to 60 minutes after an agent is deactivated;
+  there is no concurrency token on tickets, so two simultaneous escalations of one ticket can both
+  succeed and write two history rows (a `rowversion` column and a `409` on conflict would fix it);
+  no refresh tokens, lockout or rate limiting, and no roles, as the assignment excludes them.
 
 ### Migration review
 
@@ -147,8 +200,9 @@ npm run ef -- database update
 
 The migration chain is `20260926183612_InitialCreate`,
 `20261010181404_AddTicketSlaWindowSeconds`, `20261010211205_AddActiveSlaWindowSeconds`,
-`20261010211823_AddTicketEscalations`. `AddActiveSlaWindowSeconds` copies only positive stored
-windows; `AddTicketEscalations` adds the history table. These commands use Infrastructure as the
+`20261010211823_AddTicketEscalations`, and `20261011050000_AddAgentPasswordHash`.
+`AddActiveSlaWindowSeconds` copies only positive stored windows; `AddTicketEscalations` adds the
+history table and `AddAgentPasswordHash` adds credentials. These commands use Infrastructure as the
 migrations project and Presentation as the startup project through the root `npm run ef` script.
 
 ## Troubleshooting

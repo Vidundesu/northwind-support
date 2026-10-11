@@ -9,7 +9,6 @@ interface Props { ticket: TicketDetail; onUpdated: (ticket: TicketDetail) => voi
 
 export function EscalationPanel({ ticket, onUpdated }: Props) {
   const [reason, setReason] = useState('');
-  const [actor, setActor] = useState('');
   const [fieldError, setFieldError] = useState('');
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
@@ -37,10 +36,9 @@ export function EscalationPanel({ ticket, onUpdated }: Props) {
       setFieldError('Enter a reason between 5 and 500 characters.');
       return;
     }
-    if (!actor.trim() || actor.trim().length > 100) { setError('Enter who is escalating this ticket (up to 100 characters).'); return; }
     setFieldError(''); setError(''); setPending(true);
     try {
-      const result = await ticketsApi.escalate(ticket.id, trimmed, actor.trim());
+      const result = await ticketsApi.escalate(ticket.id, trimmed);
       onUpdated(result.ticket);
       setReason('');
       await reloadHistory();
@@ -56,9 +54,6 @@ export function EscalationPanel({ ticket, onUpdated }: Props) {
     {canEscalate ? <form className="form" onSubmit={submit} noValidate>
       <Field id="escalation-reason" label="Reason" error={fieldError} hint="5 to 500 characters.">
         {(props) => <textarea {...props} rows={3} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} />}
-      </Field>
-      <Field id="escalated-by" label="Escalated by">
-        {(props) => <input {...props} maxLength={100} value={actor} onChange={(event) => setActor(event.target.value)} />}
       </Field>
       {error && <p role="alert" className="field__error">{error}</p>}
       <button className="button button--primary" type="submit" disabled={pending}>{pending ? 'Escalating…' : 'Escalate ticket'}</button>

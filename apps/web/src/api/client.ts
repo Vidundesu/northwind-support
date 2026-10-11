@@ -1,3 +1,4 @@
+import { clearSession, getAccessToken } from '../auth/session';
 import type { ProblemDetails } from '../types/api';
 
 /**
@@ -25,20 +26,34 @@ export class ApiError extends Error {
   }
 }
 
+export interface RequestOptions extends RequestInit {
+  /** Skip the bearer token and the "401 means the session ended" handling (used by login). */
+  anonymous?: boolean;
+}
+
 /**
- * The single place that talks to the API. Returns parsed JSON, or throws an
- * {@link ApiError} that callers can show to the user.
+ * The single place that talks to the API. Attaches the signed-in agent's token, returns
+ * parsed JSON, or throws an {@link ApiError} that callers can show to the user.
+ * A 401 on an authenticated call ends the session, which sends the user back to /login.
  */
-export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, options?: RequestOptions): Promise<T> {
+  const { anonymous = false, ...init } = options ?? {};
+  const token = anonymous ? null : getAccessToken();
+
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init.headers ?? {}),
     },
   });
 
   if (!response.ok) {
+    if (response.status === 401 && token) {
+      clearSession();
+    }
+
     const problem = await readProblem(response);
 
     throw new ApiError(

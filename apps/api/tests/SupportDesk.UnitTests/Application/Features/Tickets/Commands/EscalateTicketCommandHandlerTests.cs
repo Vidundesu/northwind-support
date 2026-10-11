@@ -24,7 +24,7 @@ public sealed class EscalateTicketCommandHandlerTests
                 ticket.DueAtUtc, FixedClock.DefaultNow.AddHours(4), "Critical impact", "team-lead", FixedClock.DefaultNow)]);
 
         var response = await context.EscalateTicket.HandleAsync(41,
-            new EscalateTicketRequest("Critical impact", "team-lead"), CancellationToken.None);
+            new EscalateTicketRequest("Critical impact"), "team-lead", CancellationToken.None);
 
         Assert.Equal(TicketPriority.Critical, ticket.Priority);
         Assert.Equal(FixedClock.DefaultNow.AddHours(4), ticket.DueAtUtc);
@@ -46,7 +46,7 @@ public sealed class EscalateTicketCommandHandlerTests
         context.ExistingTicket(ticket);
 
         await Assert.ThrowsAsync<SupportDesk.Application.Exceptions.ValidationException>(() =>
-            context.EscalateTicket.HandleAsync(41, new EscalateTicketRequest("bad", "lead"), CancellationToken.None));
+            context.EscalateTicket.HandleAsync(41, new EscalateTicketRequest("bad"), "lead", CancellationToken.None));
 
         Assert.Equal(TicketPriority.High, ticket.Priority);
         context.VerifySaved(Times.Never());
@@ -61,7 +61,7 @@ public sealed class EscalateTicketCommandHandlerTests
         context.ExistingTicket(ticket);
 
         await Assert.ThrowsAsync<SupportDesk.Application.Exceptions.ConflictException>(() =>
-            context.EscalateTicket.HandleAsync(41, new EscalateTicketRequest("Critical impact", "lead"), CancellationToken.None));
+            context.EscalateTicket.HandleAsync(41, new EscalateTicketRequest("Critical impact"), "lead", CancellationToken.None));
 
         Assert.Equal(TicketPriority.Critical, ticket.Priority);
         context.VerifySaved(Times.Never());

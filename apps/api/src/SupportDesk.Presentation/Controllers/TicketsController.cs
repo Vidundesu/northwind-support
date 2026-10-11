@@ -59,9 +59,23 @@ public sealed class TicketsController : ControllerBase
         handler.HandleAsync(id, request, ct);
 
     [HttpPost("{id:int}/escalate")]
-    public Task<EscalationResultDto> Escalate(int id, EscalateTicketRequest request,
-        [FromServices] EscalateTicketCommandHandler handler, CancellationToken ct) =>
-        handler.HandleAsync(id, request, ct);
+    public async Task<ActionResult<EscalationResultDto>> Escalate(
+        int id, EscalateTicketRequest request,
+        [FromServices] EscalateTicketCommandHandler handler, CancellationToken ct)
+    {
+        // The identity comes from the validated JWT; any actor string sent by the client is ignored.
+        var actor = User.FindFirst("name")?.Value;
+        if (string.IsNullOrWhiteSpace(actor))
+        {
+            return Unauthorized(new ProblemDetails
+            {
+                Status = StatusCodes.Status401Unauthorized,
+                Title = "The access token does not identify an agent."
+            });
+        }
+
+        return Ok(await handler.HandleAsync(id, request, actor, ct));
+    }
 
     [HttpGet("{id:int}/escalations")]
     public Task<IReadOnlyList<TicketEscalationDto>> Escalations(int id,
