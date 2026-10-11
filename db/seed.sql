@@ -20,6 +20,7 @@ GO
 SET NOCOUNT ON;
 
 DELETE FROM dbo.AgentSpecializations;
+DELETE FROM dbo.TicketEscalations;
 DELETE FROM dbo.Tickets;
 DELETE FROM dbo.Agents;
 DELETE FROM dbo.Customers;
@@ -145,7 +146,7 @@ INSERT INTO dbo.AgentSpecializations (AgentId, CategoryId) VALUES
 )
 INSERT INTO dbo.Tickets
     (Reference, Title, [Description], CustomerId, CategoryId, AssignedAgentId, Priority, [Status],
-     CreatedAtUtc, UpdatedAtUtc, DueAtUtc, ResolvedAtUtc)
+     CreatedAtUtc, UpdatedAtUtc, DueAtUtc, SlaWindowSeconds, ActiveSlaWindowSeconds, ResolvedAtUtc)
 SELECT
     s.Ref,
     s.Title,
@@ -158,6 +159,8 @@ SELECT
     DATEADD(MINUTE, -s.CreatedMinutesAgo, @Now),
     DATEADD(MINUTE, -s.CreatedMinutesAgo + ISNULL(s.ResolvedAfterMinutes, s.CreatedMinutesAgo / 2), @Now),
     DATEADD(MINUTE, -s.CreatedMinutesAgo + s.SlaWindowMinutes, @Now),
+    s.SlaWindowMinutes * 60,
+    s.SlaWindowMinutes * 60,
     CASE WHEN s.ResolvedAfterMinutes IS NULL THEN NULL
          ELSE DATEADD(MINUTE, -s.CreatedMinutesAgo + s.ResolvedAfterMinutes, @Now) END
 FROM Seed AS s;
@@ -192,8 +195,10 @@ SELECT CASE
            WHEN t.[Status] IN (4, 5) AND t.ResolvedAtUtc <= t.DueAtUtc THEN 'Met'
            WHEN t.[Status] IN (4, 5) THEN 'Breached'
            WHEN SYSUTCDATETIME() > t.DueAtUtc THEN 'Breached'
-           WHEN DATEDIFF(MINUTE, SYSUTCDATETIME(), t.DueAtUtc) * 4
-                <= DATEDIFF(MINUTE, t.CreatedAtUtc, t.DueAtUtc) THEN 'AtRisk'
+           WHEN COALESCE(t.ActiveSlaWindowSeconds, t.SlaWindowSeconds) > 0
+                AND t.DueAtUtc <= DATEADD(SECOND,
+                    COALESCE(t.ActiveSlaWindowSeconds, t.SlaWindowSeconds) * 25 / 100,
+                    SYSUTCDATETIME()) THEN 'AtRisk'
            ELSE 'WithinSla'
        END AS SlaStatus,
        COUNT(*) AS Tickets
@@ -203,8 +208,10 @@ GROUP BY CASE
            WHEN t.[Status] IN (4, 5) AND t.ResolvedAtUtc <= t.DueAtUtc THEN 'Met'
            WHEN t.[Status] IN (4, 5) THEN 'Breached'
            WHEN SYSUTCDATETIME() > t.DueAtUtc THEN 'Breached'
-           WHEN DATEDIFF(MINUTE, SYSUTCDATETIME(), t.DueAtUtc) * 4
-                <= DATEDIFF(MINUTE, t.CreatedAtUtc, t.DueAtUtc) THEN 'AtRisk'
+           WHEN COALESCE(t.ActiveSlaWindowSeconds, t.SlaWindowSeconds) > 0
+                AND t.DueAtUtc <= DATEADD(SECOND,
+                    COALESCE(t.ActiveSlaWindowSeconds, t.SlaWindowSeconds) * 25 / 100,
+                    SYSUTCDATETIME()) THEN 'AtRisk'
            ELSE 'WithinSla'
        END
 ORDER BY SlaStatus;

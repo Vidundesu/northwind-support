@@ -39,6 +39,10 @@ public sealed class TicketConfiguration : IEntityTypeConfiguration<Ticket>
 
         builder.Property(t => t.DueAtUtc).HasColumnType("datetime2(3)");
 
+        builder.Property(t => t.SlaWindowSeconds).HasColumnType("int");
+
+        builder.Property(t => t.ActiveSlaWindowSeconds).HasColumnType("int");
+
         builder.Property(t => t.ResolvedAtUtc).HasColumnType("datetime2(3)");
 
         // A ticket is never silently detached from the rows that give it meaning.

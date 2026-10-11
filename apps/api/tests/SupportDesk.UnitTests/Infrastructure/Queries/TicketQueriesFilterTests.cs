@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using SupportDesk.Application.Contracts.Common;
 using SupportDesk.Application.Contracts.Tickets;
 using SupportDesk.Domain.Aggregates.Agents;
@@ -18,6 +19,7 @@ namespace SupportDesk.UnitTests.Infrastructure.Queries;
 public sealed class TicketQueriesFilterTests : IDisposable
 {
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
+    private readonly FixedClock _clock = new();
     private readonly SupportDbContext _db;
     private readonly Customer _contoso;
     private readonly Customer _fabrikam;
@@ -56,6 +58,37 @@ public sealed class TicketQueriesFilterTests : IDisposable
 
         Assert.Equal(new[] { "TCK-0002", "TCK-0003" }, References(result).Order());
         Assert.Equal(2, result.TotalCount);
+    }
+
+    [Fact]
+    public async Task List_projection_uses_the_original_window_for_at_risk_status()
+    {
+        var ticket = Ticket("TCK-SLA1").Build();
+        ticket.SetInitialSlaWindow(3600, _clock.UtcNow);
+        _db.Add(ticket);
+        await _db.SaveChangesAsync();
+        _clock.Advance(TimeSpan.FromMinutes(46));
+
+        var result = await Query(new TicketQuery());
+
+        Assert.Equal(SlaStatus.AtRisk, Assert.Single(result.Items).SlaStatus);
+    }
+
+    [Fact]
+    public async Task Sla_status_filter_runs_before_count_and_uses_the_active_window()
+    {
+        var atRisk = Ticket("TCK-RISK").Build();
+        atRisk.SetInitialSlaWindow(3600, _clock.UtcNow);
+        var within = Ticket("TCK-WITHIN").Build();
+        within.SetInitialSlaWindow(8 * 3600, _clock.UtcNow);
+        _db.AddRange(atRisk, within);
+        await _db.SaveChangesAsync();
+        _clock.Advance(TimeSpan.FromMinutes(46));
+
+        var result = await Query(new TicketQuery { SlaStatus = SlaStatus.AtRisk });
+
+        Assert.Equal(1, result.TotalCount);
+        Assert.Equal("TCK-RISK", Assert.Single(result.Items).Reference);
     }
 
     [Fact]
@@ -164,7 +197,15 @@ public sealed class TicketQueriesFilterTests : IDisposable
     }
 
     private Task<PagedResult<TicketListItemDto>> Query(TicketQuery query) =>
-        new TicketQueries(_db, new FixedClock()).GetPagedAsync(query.Normalized(), CancellationToken.None);
+        new TicketQueries(_db, _clock, ThresholdConfiguration())
+            .GetPagedAsync(query.Normalized(), CancellationToken.None);
+
+    private static IConfiguration ThresholdConfiguration()
+    {
+        var configuration = new Mock<IConfiguration>();
+        configuration.Setup(c => c["Sla:AtRiskThresholdPercent"]).Returns("25");
+        return configuration.Object;
+    }
 
     private static List<string> References(PagedResult<TicketListItemDto> result) =>
         result.Items.Select(item => item.Reference).ToList();

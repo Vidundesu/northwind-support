@@ -87,9 +87,11 @@ Both pass on a clean checkout and neither needs a database.
 
 | Endpoint | Description |
 | --- | --- |
-| `GET /api/tickets` | Paged list with `search`, `status`, `priority`, `categoryId`, `customerId`, `assignedAgentId`, `unassignedOnly`, `sortBy`, `sortDirection`. **Filters are accepted but not applied yet** (Task 1). |
+| `GET /api/tickets` | Paged list with database-side `search`, `status`, `priority`, `categoryId`, `customerId`, `assignedAgentId`, `unassignedOnly`, `slaStatus`, `sortBy`, `sortDirection`. |
 | `GET /api/tickets/{id}` | One ticket |
-| `POST /api/tickets` | Create a ticket |
+| `POST /api/tickets` | Create and automatically triage a ticket |
+| `POST /api/tickets/{id}/escalate` | Escalate one priority level and record the actor and reason |
+| `GET /api/tickets/{id}/escalations` | Escalation history, newest first |
 | `PATCH /api/tickets/{id}/status` · `/assignment` | Change status / assignee |
 | `GET /api/customers` · `/api/agents` · `/api/categories` | Reference data |
 
@@ -97,6 +99,57 @@ Errors are `ProblemDetails`: `400` validation, `404` not found, `409` conflict o
 
 **Seed data:** 5 categories, 6 customers (3 Premium), 6 agents (one inactive, one at their limit)
 and 40 tickets across every status, priority and SLA state.
+
+### Task 2 decisions
+
+- One domain `SlaStatusRules` expression drives both in-memory ticket projections and the
+  `slaStatus` database filter. The filter is applied before count and paging.
+- `Tickets.SlaWindowSeconds` preserves the original SLA duration. `ActiveSlaWindowSeconds`
+  tracks the duration associated with the current due date, so an escalation can reset the due
+  date without changing the original commitment or applying its old duration to the new risk
+  threshold.
+- Agent workloads are grouped in SQL once, then combined with the agent specialization rows.
+  Ties use the lowest agent id; an eligible current owner is retained during escalation.
+- `TicketEscalations` uses a composite `(TicketId, EscalatedAtUtc DESC, Id DESC)` index for the
+  newest-first history lookup. Ticket and optional agent references use restrictive deletes.
+- Until Task 3 supplies an authenticated identity, escalation requests send `escalatedBy` in the
+  body as the assessment specifies. No authentication behavior is included here.
+- The optional SLA summary report is not implemented.
+
+### Migration review
+
+Development startup currently applies migrations and seeds automatically. Do not start the API
+against an unverified database. Before manually applying anything, inspect the effective target
+and migration history, back up valuable data, and reconcile databases created from `db/schema.sql`
+that do not have matching `__EFMigrationsHistory` rows. The hand-maintained schema has legacy FK
+constraint names and server defaults that are not emitted by `InitialCreate`; check the actual
+objects and defaults instead of assuming the schema script is an exact migration baseline. Do not
+blindly apply the full chain to a schema that already contains the tables.
+
+From the repository root, the offline commands are:
+
+```bash
+npm run ef -- migrations list --no-connect
+npm run ef -- migrations has-pending-model-changes
+npm run ef -- migrations script 0 AddTicketEscalations --output /tmp/northwind-task2.sql
+npm run ef -- dbcontext info
+```
+
+`migrations list --no-connect` lists code migrations without reporting which ones a database has
+applied. `dbcontext info` resolves the provider, server and database from `ConnectionStrings:Default`
+without opening a database connection; do not share the connection string if separately
+inspecting configuration. After manually verifying that target and its history (and backing it
+up if it contains data), applying the migrations is a separate operator action:
+
+```bash
+npm run ef -- database update
+```
+
+The migration chain is `20260926183612_InitialCreate`,
+`20261010181404_AddTicketSlaWindowSeconds`, `20261010211205_AddActiveSlaWindowSeconds`,
+`20261010211823_AddTicketEscalations`. `AddActiveSlaWindowSeconds` copies only positive stored
+windows; `AddTicketEscalations` adds the history table. These commands use Infrastructure as the
+migrations project and Presentation as the startup project through the root `npm run ef` script.
 
 ## Troubleshooting
 

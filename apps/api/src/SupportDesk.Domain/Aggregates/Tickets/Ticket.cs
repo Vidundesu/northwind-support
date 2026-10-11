@@ -1,5 +1,6 @@
 using SupportDesk.Domain.Common;
 using SupportDesk.Domain.Exceptions;
+using SupportDesk.Domain.Policies.Tickets;
 
 namespace SupportDesk.Domain.Aggregates.Tickets;
 
@@ -42,6 +43,12 @@ public sealed class Ticket : AggregateRoot
 
     /// <summary>When the team has committed to responding by. Null when no SLA applies.</summary>
     public DateTime? DueAtUtc { get; private set; }
+
+    /// <summary>The original response window in seconds, when one has been established.</summary>
+    public int? SlaWindowSeconds { get; private set; }
+
+    /// <summary>The duration associated with the currently active due date.</summary>
+    public int? ActiveSlaWindowSeconds { get; private set; }
 
     public DateTime? ResolvedAtUtc { get; private set; }
 
@@ -110,5 +117,105 @@ public sealed class Ticket : AggregateRoot
     {
         AssignedAgentId = agentId;
         UpdatedAtUtc = nowUtc;
+    }
+
+    /// <summary>
+    /// Sets the original SLA window when the team first commits to a response time.
+    /// The due date is anchored to ticket creation and this value cannot be replaced later.
+    /// </summary>
+    /// <exception cref="BusinessRuleViolationException">The window is invalid or already set.</exception>
+    public void SetInitialSlaWindow(int windowSeconds, DateTime nowUtc)
+    {
+        if (windowSeconds <= 0)
+        {
+            throw new BusinessRuleViolationException("An SLA window must be a positive number of seconds.");
+        }
+
+        if (SlaWindowSeconds is not null)
+        {
+            throw new BusinessRuleViolationException($"Ticket {Reference} already has an SLA window.");
+        }
+
+        DateTime dueAtUtc;
+        try
+        {
+            dueAtUtc = CreatedAtUtc.AddSeconds(windowSeconds);
+        }
+        catch (ArgumentOutOfRangeException exception)
+        {
+            throw new BusinessRuleViolationException($"The SLA window is outside the supported date range: {exception.Message}");
+        }
+
+        SlaWindowSeconds = windowSeconds;
+        ActiveSlaWindowSeconds = windowSeconds;
+        DueAtUtc = dueAtUtc;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    /// <summary>Applies a completed initial triage decision to a newly raised ticket.</summary>
+    public void ApplyInitialTriage(TriageDecision decision, DateTime nowUtc)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+
+        if (Status != TicketStatus.New || DueAtUtc is not null || SlaWindowSeconds is not null || AssignedAgentId is not null)
+        {
+            throw new BusinessRuleViolationException($"Ticket {Reference} has already been triaged.");
+        }
+
+        var expectedDueAtUtc = CreatedAtUtc.Add(decision.SlaWindow.Duration);
+        if (decision.DueAtUtc != expectedDueAtUtc)
+        {
+            throw new BusinessRuleViolationException("The triage decision due date does not match the ticket creation time and SLA window.");
+        }
+
+        Priority = decision.Priority;
+        AssignedAgentId = decision.AssignedAgentId;
+        SlaWindowSeconds = decision.SlaWindowSeconds;
+        ActiveSlaWindowSeconds = decision.SlaWindowSeconds;
+        DueAtUtc = decision.DueAtUtc;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    /// <summary>
+    /// Applies a valid one-level escalation decision. The due date is recalculated from the
+    /// escalation time while <see cref="SlaWindowSeconds"/> retains its original D1 value.
+    /// </summary>
+    public void ApplyEscalationDecision(TriageDecision decision, DateTime escalatedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+
+        if (Status == TicketStatus.Resolved)
+        {
+            throw new BusinessRuleViolationException($"Resolved ticket {Reference} cannot be escalated.");
+        }
+
+        if (Status == TicketStatus.Closed)
+        {
+            throw new BusinessRuleViolationException($"Closed ticket {Reference} cannot be escalated.");
+        }
+
+        if (escalatedAtUtc.Kind != DateTimeKind.Utc)
+        {
+            throw new ArgumentException("The escalation time must be UTC.", nameof(escalatedAtUtc));
+        }
+
+        var nextPriority = PriorityPolicy.NextEscalationPriority(Priority);
+        if (decision.Priority != nextPriority.Priority)
+        {
+            throw new BusinessRuleViolationException(
+                $"Escalating ticket {Reference} must advance priority from {Priority} to {nextPriority.Priority}.");
+        }
+
+        var expectedDueAtUtc = escalatedAtUtc.Add(decision.SlaWindow.Duration);
+        if (decision.DueAtUtc != expectedDueAtUtc)
+        {
+            throw new BusinessRuleViolationException("The escalation due date does not match the escalation time and SLA window.");
+        }
+
+        Priority = decision.Priority;
+        AssignedAgentId = decision.AssignedAgentId;
+        DueAtUtc = decision.DueAtUtc;
+        ActiveSlaWindowSeconds = decision.SlaWindowSeconds;
+        UpdatedAtUtc = escalatedAtUtc;
     }
 }

@@ -1,4 +1,5 @@
 using SupportDesk.Domain.Aggregates.Agents;
+using SupportDesk.Domain.Policies.Tickets;
 
 namespace SupportDesk.Domain.Repositories;
 
@@ -8,4 +9,6 @@ namespace SupportDesk.Domain.Repositories;
 public interface IAgentRepository
 {
     Task<Agent?> GetByIdAsync(int id, CancellationToken ct);
+
+    Task<IReadOnlyList<AgentWorkload>> GetWorkloadsAsync(CancellationToken ct);
 }

@@ -24,6 +24,8 @@ public class RaiseTicketCommandHandlerTests
         Assert.Equal(TicketPriority.High, created.Priority);
         Assert.Equal(FixedClock.DefaultNow, created.CreatedAtUtc);
         Assert.Equal(FixedClock.DefaultNow, created.UpdatedAtUtc);
+        Assert.Equal(8 * 3600, created.SlaWindowSeconds);
+        Assert.Equal(FixedClock.DefaultNow.AddHours(8), created.DueAtUtc);
         context.VerifySaved(Times.Once());
     }
 
@@ -36,6 +38,26 @@ public class RaiseTicketCommandHandlerTests
 
         Assert.NotNull(context.AddedTicket);
         Assert.Equal(TicketPriority.Medium, context.AddedTicket.Priority);
+        Assert.Equal(24 * 3600, context.AddedTicket.SlaWindowSeconds);
+        Assert.Equal(FixedClock.DefaultNow.AddHours(24), context.AddedTicket.DueAtUtc);
+    }
+
+    [Fact]
+    public async Task HandleAsync_ForcesCriticalAndAppliesPremiumMultiplier()
+    {
+        var context = new TicketCommandTestContext();
+        context.Categories.Setup(c => c.GetByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SupportDesk.Domain.Aggregates.Categories.Category("Security", true, true));
+        context.Customers.Setup(c => c.GetByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SupportDesk.Domain.Aggregates.Customers.Customer(
+                "Premium", "premium@example.test", null, SupportDesk.Domain.Aggregates.Customers.CustomerTier.Premium,
+                FixedClock.DefaultNow));
+
+        await context.RaiseTicket.HandleAsync(Request(TicketPriority.Low), CancellationToken.None);
+
+        Assert.Equal(TicketPriority.Critical, context.AddedTicket!.Priority);
+        Assert.Equal(2 * 3600, context.AddedTicket.SlaWindowSeconds);
+        Assert.Equal(FixedClock.DefaultNow.AddHours(2), context.AddedTicket.DueAtUtc);
     }
 
     [Fact]
@@ -43,8 +65,8 @@ public class RaiseTicketCommandHandlerTests
     {
         var context = new TicketCommandTestContext();
         context.Customers
-            .Setup(c => c.ExistsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
+            .Setup(c => c.GetByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SupportDesk.Domain.Aggregates.Customers.Customer?)null);
 
         var exception = await Assert.ThrowsAsync<NotFoundException>(
             () => context.RaiseTicket.HandleAsync(Request(), CancellationToken.None));

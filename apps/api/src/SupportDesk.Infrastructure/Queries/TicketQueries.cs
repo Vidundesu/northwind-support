@@ -1,4 +1,6 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using SupportDesk.Application.Abstractions;
 using SupportDesk.Application.Contracts.Common;
 using SupportDesk.Application.Contracts.Tickets;
@@ -14,19 +16,28 @@ namespace SupportDesk.Infrastructure.Queries;
 /// Ticket reads. Projected in the database and never tracked. Aggregates hold only each
 /// other's ids, so the customer, category and agent labels are joined in here, on the read side.
 /// </summary>
-public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQueries
+/// <remarks>
+/// SLA derivation runs in the final projection after EF materializes its scalar inputs. If SLA
+/// filtering moves into SQL, translate and verify the domain threshold arithmetic explicitly;
+/// do not put a compiled delegate into an EF predicate.
+/// </remarks>
+public sealed class TicketQueries(SupportDbContext db, IClock clock, IConfiguration configuration) : ITicketQueries
 {
+    private readonly int _atRiskThresholdPercent = ReadAtRiskThreshold(configuration);
+
     /// <remarks>
     /// Filters, counts, sorts and pages in that order, all in the database, so the count and the
     /// page always describe the same filtered set.
     /// </remarks>
     public async Task<PagedResult<TicketListItemDto>> GetPagedAsync(TicketQuery query, CancellationToken ct)
     {
-        var tickets = ApplyFilters(TicketsWithLabels(), query);
+        var now = clock.UtcNow;
+        var slaFilter = query.SlaStatus is { } status
+            ? SlaStatusRules.CreatePredicate(status, now, _atRiskThresholdPercent)
+            : null;
+        var tickets = ApplyFilters(TicketsWithLabels(slaFilter), query);
 
         var totalCount = await tickets.CountAsync(ct);
-
-        var now = clock.UtcNow;
 
         var items = await ApplySort(tickets, query)
             .Skip((query.Page - 1) * query.PageSize)
@@ -45,7 +56,9 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQu
                 UpdatedAtUtc = x.Ticket.UpdatedAtUtc,
                 DueAtUtc = x.Ticket.DueAtUtc,
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
-                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, now)
+                SlaStatus = SlaEvaluator.Evaluate(
+                    x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, x.Ticket.Status,
+                    x.Ticket.ActiveSlaWindowSeconds ?? x.Ticket.SlaWindowSeconds, now, _atRiskThresholdPercent)
             })
             .ToListAsync(ct);
 
@@ -74,7 +87,9 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQu
                 UpdatedAtUtc = x.Ticket.UpdatedAtUtc,
                 DueAtUtc = x.Ticket.DueAtUtc,
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
-                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, now)
+                SlaStatus = SlaEvaluator.Evaluate(
+                    x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, x.Ticket.Status,
+                    x.Ticket.ActiveSlaWindowSeconds ?? x.Ticket.SlaWindowSeconds, now, _atRiskThresholdPercent)
             })
             .FirstOrDefaultAsync(ct);
     }
@@ -101,20 +116,43 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQu
                 UpdatedAtUtc = x.Ticket.UpdatedAtUtc,
                 DueAtUtc = x.Ticket.DueAtUtc,
                 ResolvedAtUtc = x.Ticket.ResolvedAtUtc,
-                SlaStatus = SlaEvaluator.Evaluate(x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, now)
+                SlaStatus = SlaEvaluator.Evaluate(
+                    x.Ticket.DueAtUtc, x.Ticket.ResolvedAtUtc, x.Ticket.Status,
+                    x.Ticket.ActiveSlaWindowSeconds ?? x.Ticket.SlaWindowSeconds, now, _atRiskThresholdPercent)
             })
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<TicketEscalationDto>> GetEscalationsAsync(int ticketId, CancellationToken ct) =>
+        await (from escalation in db.Set<TicketEscalation>().AsNoTracking()
+               where escalation.TicketId == ticketId
+               join fromAgentRow in db.Set<Agent>() on escalation.FromAgentId equals fromAgentRow.Id into fromAgents
+               from fromAgent in fromAgents.DefaultIfEmpty()
+               join toAgentRow in db.Set<Agent>() on escalation.ToAgentId equals toAgentRow.Id into toAgents
+               from toAgent in toAgents.DefaultIfEmpty()
+               orderby escalation.EscalatedAtUtc descending, escalation.Id descending
+               select new TicketEscalationDto(
+                   escalation.Id, escalation.TicketId, escalation.FromPriority, escalation.ToPriority,
+                   fromAgent == null ? null : new AgentSummaryDto(fromAgent.Id, fromAgent.FullName),
+                   toAgent == null ? null : new AgentSummaryDto(toAgent.Id, toAgent.FullName),
+                   escalation.FromDueAtUtc, escalation.ToDueAtUtc, escalation.Reason,
+                   escalation.EscalatedBy, escalation.EscalatedAtUtc))
+            .ToListAsync(ct);
+
     /// <summary>
     /// Every ticket with the rows that label it. Filter and sort this, then project.
     /// </summary>
-    private IQueryable<TicketWithLabels> TicketsWithLabels() =>
-        from ticket in db.Set<Ticket>().AsNoTracking()
+    private IQueryable<TicketWithLabels> TicketsWithLabels(Expression<Func<Ticket, bool>>? slaFilter = null)
+    {
+        var source = db.Set<Ticket>().AsNoTracking();
+        if (slaFilter is not null) source = source.Where(slaFilter);
+        return
+        from ticket in source
         join customer in db.Set<Customer>() on ticket.CustomerId equals customer.Id
         join category in db.Set<Category>() on ticket.CategoryId equals category.Id
         from agent in db.Set<Agent>().Where(a => a.Id == ticket.AssignedAgentId).DefaultIfEmpty()
         select new TicketWithLabels { Ticket = ticket, Customer = customer, Category = category, Agent = agent };
+    }
 
     /// <summary>
     /// Narrows the list to the supplied filters, combined with AND. Everything here stays an
@@ -206,5 +244,17 @@ public sealed class TicketQueries(SupportDbContext db, IClock clock) : ITicketQu
         public required Category Category { get; init; }
 
         public Agent? Agent { get; init; }
+    }
+
+    private static int ReadAtRiskThreshold(IConfiguration configuration)
+    {
+        var value = configuration["Sla:AtRiskThresholdPercent"];
+        if (!int.TryParse(value, out var threshold) || threshold is < 1 or > 100)
+        {
+            throw new InvalidOperationException(
+                "Configuration 'Sla:AtRiskThresholdPercent' must be a whole percentage from 1 through 100.");
+        }
+
+        return threshold;
     }
 }
