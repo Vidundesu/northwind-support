@@ -111,12 +111,12 @@ describe('useTicketList', () => {
       );
     });
 
-    it('does not send a request per keystroke', async () => {
+    it('does not send a request per keystroke when typing and backspacing rapidly', async () => {
       const { result } = renderHook(() => useTicketList());
       await settle();
       getTickets.mockClear();
 
-      for (const text of ['i', 'in', 'inv']) {
+      for (const text of ['i', 'in', 'inv', 'in', 'inv', 'invo', 'inv']) {
         act(() => {
           result.current.updateFilters({ search: text });
         });
@@ -131,6 +131,34 @@ describe('useTicketList', () => {
 
       expect(getTickets).toHaveBeenCalledTimes(1);
       expect(getTickets).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'inv' }));
+    });
+
+    it('debounces backspacing and clearing consistently', async () => {
+      const { result } = renderHook(() => useTicketList());
+      await settle();
+
+      act(() => {
+        result.current.updateFilters({ search: 'invoice' });
+      });
+      await settle();
+      expect(getTickets).toHaveBeenCalledTimes(2);
+      getTickets.mockClear();
+
+      for (const text of ['invoic', 'invoi', 'invo', 'inv', 'in', 'i', '']) {
+        act(() => {
+          result.current.updateFilters({ search: text });
+        });
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(100);
+        });
+      }
+
+      expect(getTickets).not.toHaveBeenCalled();
+
+      await settle();
+
+      expect(getTickets).toHaveBeenCalledTimes(1);
+      expect(getTickets).toHaveBeenLastCalledWith(expect.objectContaining({ search: '' }));
     });
 
     it('requests with the first page again when a filter changes on a later page', async () => {
