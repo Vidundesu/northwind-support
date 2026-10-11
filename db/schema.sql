@@ -58,6 +58,7 @@ CREATE TABLE dbo.Agents
     Id             INT           IDENTITY(1,1) NOT NULL CONSTRAINT PK_Agents PRIMARY KEY,
     FullName       NVARCHAR(200) NOT NULL,
     Email          NVARCHAR(256) NOT NULL,
+    PasswordHash   NVARCHAR(512) NOT NULL,
     IsActive       BIT           NOT NULL CONSTRAINT DF_Agents_IsActive DEFAULT (1),
     MaxOpenTickets INT           NOT NULL CONSTRAINT DF_Agents_MaxOpenTickets DEFAULT (10),
     CreatedAtUtc   DATETIME2(3)  NOT NULL CONSTRAINT DF_Agents_CreatedAtUtc DEFAULT (SYSUTCDATETIME()),
