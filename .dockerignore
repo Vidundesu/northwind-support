@@ -1,0 +1,11 @@
+# Source and tool output never needed to build the API image.
+**/bin/
+**/obj/
+**/node_modules/
+.git/
+.env
+.env.*
+!.env.example
+
+# The web app is deliberately not part of this image.
+apps/web/

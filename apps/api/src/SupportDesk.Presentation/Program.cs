@@ -10,6 +10,7 @@ using SupportDesk.Domain.Aggregates.Agents;
 using SupportDesk.Presentation.Authentication;
 using SupportDesk.Application;
 using SupportDesk.Infrastructure;
+using SupportDesk.Infrastructure.Data;
 using SupportDesk.Presentation.Extensions;
 using SupportDesk.Presentation.Filters;
 using SupportDesk.Presentation.Middleware;
@@ -128,6 +129,22 @@ if (app.Environment.IsDevelopment())
 app.UseCors(FrontendCorsPolicy);
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Deliberately public: orchestrators and load balancers need to distinguish a live API from one
+// that can also serve requests backed by SQL Server. All business routes remain fallback-protected.
+app.MapGet("/health", async (SupportDbContext db, CancellationToken cancellationToken) =>
+{
+    try
+    {
+        return await db.Database.CanConnectAsync(cancellationToken)
+            ? Results.Ok(new { status = "Healthy" })
+            : Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Database unavailable");
+    }
+    catch
+    {
+        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Database unavailable");
+    }
+}).AllowAnonymous();
 
 app.MapControllers();
 

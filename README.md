@@ -65,6 +65,53 @@ credentials.**
 **Visual Studio 2026:** run `npm run db:up`, open `SupportDesk.sln`, set
 **SupportDesk.Presentation** as the startup project, and press F5 on the **https** profile.
 
+## Docker API
+
+The API image is built from the repository root and runs as the non-root user included in the
+ASP.NET runtime image. It listens only on HTTP port 8080 in the container; Compose publishes it
+at http://localhost:5080. TLS belongs at the reverse proxy/load balancer in a deployed environment.
+
+```bash
+# Starts SQL Server, then builds the API and waits for SQL Server to be healthy before starting it.
+docker compose up --build
+
+# In another terminal: database-aware, unauthenticated health check.
+curl -i http://localhost:5080/health
+
+# The React dev server proxies to the containerised API.
+VITE_API_PROXY_TARGET=http://localhost:5080 npm run web
+```
+
+Compose supplies the SQL Server hostname (`sqlserver`), connection string, environment name, and
+JWT signing key as environment variables; none are embedded in the image. Copy `.env.example` to
+`.env` and replace `Authentication__Jwt__SigningKey` before using this beyond local development.
+When Compose runs with `ASPNETCORE_ENVIRONMENT=Development`, the existing startup behavior applies
+EF migrations and seeds the demo data, including on an empty `supportdesk-sql` volume.
+
+For a real deployment, run a reviewed, versioned EF migration job (or generate and have the
+deployment platform execute an idempotent SQL migration script) before rolling out the API. That
+makes schema changes deliberate, observable, and recoverable rather than allowing every API
+replica to race to change production data at startup. Production should not use the Development
+environment or automatic demo seed path.
+
+### Docker verification
+
+From a clean local checkout, I verify the container path with:
+
+```bash
+docker compose down -v && docker compose up --build
+curl -f http://localhost:5080/health
+docker compose exec api whoami                 # must not print root
+docker image ls                                # compare the API runtime image with dotnet/sdk:10.0
+```
+
+After editing one `.cs` file, rerun `docker compose build api`; Docker should report the
+`dotnet restore` layer as cached because project files and central build inputs are copied before
+the remaining source. With a JWT obtained from `POST /api/auth/login`, `GET /api/tickets` confirms
+the seeded data is reachable. On this Apple Silicon build, `northwind-support-api` is **483 MB**;
+the SDK is used only in the discarded build stage. Image sizes vary with the base-image digest and
+Docker platform, so record your own `docker image ls` result when verifying another environment.
+
 ## Tests
 
 ```bash
@@ -112,7 +159,8 @@ and 40 tickets across every status, priority and SLA state.
 - `POST /api/auth/login` returns a signed JWT, expiry, and agent identity. Invalid email and password
   share the same generic `401` response. `GET /api/auth/me` returns the validated token identity.
 - A fallback authorization policy protects API endpoints centrally. Login is explicitly anonymous;
-  Swagger remains available. Escalation history uses the authenticated agent name, never the caller's
+  Swagger and `GET /health` are explicitly anonymous; the health endpoint returns `503` when SQL
+  Server cannot be reached. Escalation history uses the authenticated agent name, never the caller's
   submitted actor string.
 - Access tokens expire after 60 minutes. JWT issuer/audience/expiry are configured in application
   settings; the development signing key is explicitly development-only. In non-Development environments,
@@ -168,6 +216,9 @@ and 40 tickets across every status, priority and SLA state.
   there is no concurrency token on tickets, so two simultaneous escalations of one ticket can both
   succeed and write two history rows (a `rowversion` column and a `409` on conflict would fix it);
   no refresh tokens, lockout or rate limiting, and no roles, as the assignment excludes them.
+  Docker packaging intentionally does not include Kubernetes/Helm, registry publishing, CI/CD,
+  HTTPS inside the container, Docker secrets/vault integration, multi-architecture builds, or a
+  containerised React app.
 
 ### Migration review
 
