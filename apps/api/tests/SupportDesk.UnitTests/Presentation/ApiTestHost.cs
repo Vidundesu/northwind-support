@@ -5,7 +5,6 @@ using System.Text;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 
@@ -21,29 +20,26 @@ internal static class ApiTestHost
     private const string Audience = "NorthwindSupportDesk.Web.ApiTests";
     private const string SigningKey = "api-contract-test-signing-key-at-least-32-bytes";
 
+    static ApiTestHost()
+    {
+        // Program.cs reads configuration while it is still registering services, which happens
+        // before WebApplicationFactory applies its in-memory sources. Environment variables are
+        // visible from the first line of Program, so the test settings live there. Every test
+        // class uses the same values, so sharing them across the process is safe.
+        Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Production");
+        Environment.SetEnvironmentVariable(
+            "ConnectionStrings__Default",
+            "Server=127.0.0.1;Database=UnusedApiTest;User Id=test;Password=NotARealPassword123;TrustServerCertificate=True");
+        Environment.SetEnvironmentVariable("Authentication__Jwt__Issuer", Issuer);
+        Environment.SetEnvironmentVariable("Authentication__Jwt__Audience", Audience);
+        Environment.SetEnvironmentVariable("Authentication__Jwt__SigningKey", SigningKey);
+        Environment.SetEnvironmentVariable("Authentication__Jwt__LifetimeMinutes", "60");
+    }
+
     public static WebApplicationFactory<Program> Create(Action<IServiceCollection>? configureServices = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Production");
-            builder.ConfigureAppConfiguration((_, configuration) =>
-            {
-                configuration.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["ConnectionStrings:Default"] =
-                        "Server=127.0.0.1;Database=UnusedApiTest;User Id=test;Password=NotARealPassword123;TrustServerCertificate=True",
-                    ["Authentication:Jwt:Issuer"] = Issuer,
-                    ["Authentication:Jwt:Audience"] = Audience,
-                    ["Authentication:Jwt:SigningKey"] = SigningKey,
-                    ["Authentication:Jwt:LifetimeMinutes"] = "60",
-                    ["Sla:BaseWindowHours:Low"] = "72",
-                    ["Sla:BaseWindowHours:Medium"] = "24",
-                    ["Sla:BaseWindowHours:High"] = "8",
-                    ["Sla:BaseWindowHours:Critical"] = "4",
-                    ["Sla:PremiumCustomerMultiplier"] = "0.5",
-                    ["Sla:MinimumWindowHours"] = "1",
-                    ["Sla:AtRiskThresholdPercent"] = "25"
-                });
-            });
 
             if (configureServices is not null)
             {
@@ -56,18 +52,21 @@ internal static class ApiTestHost
     public static HttpClient CreateAuthenticatedClient(WebApplicationFactory<Program> factory, string fullName = "Alex Turner")
     {
         var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken(fullName));
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            CreateToken(42, fullName, "alex.turner@northwind-support.example"));
         return client;
     }
 
-    private static string CreateToken(string fullName)
+    public static string CreateToken(int id, string fullName, string email)
     {
+        var idString = id.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var claims = new[]
         {
-            new Claim(JwtRegisteredClaimNames.Sub, "42"),
-            new Claim("agentId", "42"),
+            new Claim(JwtRegisteredClaimNames.Sub, idString),
+            new Claim("agentId", idString),
             new Claim(JwtRegisteredClaimNames.Name, fullName),
-            new Claim(JwtRegisteredClaimNames.Email, "alex.turner@northwind-support.example"),
+            new Claim(JwtRegisteredClaimNames.Email, email),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N"))
         };
         var credentials = new SigningCredentials(
