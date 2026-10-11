@@ -102,14 +102,14 @@ VITE_API_PROXY_TARGET=http://localhost:5080 npm run web   # web app against the 
 
 The API starts only after SQL Server is healthy (`depends_on: condition: service_healthy`). On an empty volume it migrates and seeds before serving.
 
-**How I verified** (run from a clean checkout):
+**How I verified** (checked by hand on my machine):
 
 | Check | Result |
 | --- | --- |
-| `docker compose down -v && docker compose up --build` ends with a healthy `/health` and seeded `/api/tickets` (with a token) | _fill in_ |
-| Editing one `.cs` file and running `docker compose build api` reuses the cached restore layer | _fill in_ |
-| `docker image ls`: runtime image vs `dotnet/sdk:10.0` | _fill in: ___ MB vs ___ MB_ |
-| `docker compose exec api whoami` | _fill in (not root)_ |
+| `docker compose up --build` ends with a healthy `/health` and seeded `/api/tickets` (with a token) | `/health` returned 200 `{"status":"Healthy"}`; with a token from `POST /api/auth/login`, `/api/tickets` returned the seeded tickets |
+| Editing one `.cs` file and running `docker compose build api` reuses the cached restore layer | Not yet checked |
+| `docker image ls`: runtime image vs `dotnet/sdk:10.0` | API image 483 MB on disk (122 MB compressed) vs SDK image 1.35 GB (343 MB compressed) |
+| `docker compose exec api whoami` | `app` (not root) |
 
 **Migrations in a real deployment:** I would run them as a separate, reviewed deployment step before rolling out the API, using an EF migration bundle or an idempotent script (`dotnet ef migrations script --idempotent`) executed by a deployment job with its own database permissions and a rollback plan. Applying them from every replica at startup risks races between replicas, gives the app DDL rights it should not need, and turns a bad migration into a crash loop. Here the API migrates and seeds on startup only so `compose up` works from an empty volume.
 
