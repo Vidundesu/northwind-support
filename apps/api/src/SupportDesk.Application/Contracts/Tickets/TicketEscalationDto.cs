@@ -7,6 +7,6 @@ public sealed record TicketEscalationDto(
     AgentSummaryDto? FromAgent, AgentSummaryDto? ToAgent,
     DateTime? FromDueAtUtc, DateTime ToDueAtUtc, string Reason, string EscalatedBy, DateTime EscalatedAtUtc);
 
-public sealed record EscalateTicketRequest(string? Reason, string? EscalatedBy);
+public sealed record EscalateTicketRequest(string? Reason);
 
 public sealed record EscalationResultDto(TicketDetailDto Ticket, TicketEscalationDto Escalation);

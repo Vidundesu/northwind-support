@@ -15,6 +15,10 @@ public sealed class AgentRepository(SupportDbContext db) : IAgentRepository
             .Include(a => a.Specializations)
             .FirstOrDefaultAsync(a => a.Id == id, ct);
 
+    /// <summary>Finds an agent by their normalized email address for authentication.</summary>
+    public Task<Agent?> GetByEmailAsync(string email, CancellationToken ct) =>
+        db.Set<Agent>().AsNoTracking().FirstOrDefaultAsync(agent => agent.Email == email, ct);
+
     public async Task<IReadOnlyList<AgentWorkload>> GetWorkloadsAsync(CancellationToken ct)
     {
         var counts = await db.Set<Ticket>().AsNoTracking()
