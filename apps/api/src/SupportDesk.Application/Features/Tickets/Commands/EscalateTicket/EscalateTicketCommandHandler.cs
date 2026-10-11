@@ -20,7 +20,8 @@ public sealed class EscalateTicketCommandHandler(
         var reason = request.Reason?.Trim();
         var actor = escalatedBy?.Trim();
         var errors = new Dictionary<string, string[]>();
-        if (reason is null || reason.Length is < 5 or > 500) errors["reason"] = ["Reason must contain 5 to 500 characters."];
+        if (reason is null || reason.Length is < EscalateTicketRequest.MinReasonLength or > EscalateTicketRequest.MaxReasonLength)
+            errors["reason"] = [EscalateTicketRequestValidator.ReasonMessage];
         if (string.IsNullOrWhiteSpace(actor) || actor.Length > 100) errors["escalatedBy"] = ["EscalatedBy is required and limited to 100 characters."];
         if (errors.Count > 0) throw new ValidationException(errors);
 

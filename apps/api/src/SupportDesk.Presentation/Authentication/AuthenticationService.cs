@@ -15,9 +15,22 @@ public sealed class AuthenticationService(
     IPasswordHasher<Agent> passwordHasher,
     JwtSettings jwtSettings) : IAuthenticationService
 {
+    // Generous for real credentials; stops a multi-megabyte "password" being hashed in full.
+    private const int MaxEmailLength = 254;
+    private const int MaxPasswordLength = 128;
+
+    // Hashed once, so an unknown email can cost the same hashing work as a real attempt.
+    private static readonly Agent PlaceholderAgent = new("Placeholder", "placeholder@invalid", 1, DateTime.UnixEpoch);
+    private static readonly string PlaceholderHash = new PasswordHasher<Agent>().HashPassword(PlaceholderAgent, "placeholder");
+
     public async Task<LoginResponse?> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+        {
+            return null;
+        }
+
+        if (request.Email.Length > MaxEmailLength || request.Password.Length > MaxPasswordLength)
         {
             return null;
         }
@@ -26,6 +39,8 @@ public sealed class AuthenticationService(
         var agent = await agents.GetByEmailAsync(email, cancellationToken);
         if (agent is null)
         {
+            // Same work as a wrong password, so response time does not reveal which emails exist.
+            passwordHasher.VerifyHashedPassword(PlaceholderAgent, PlaceholderHash, request.Password);
             return null;
         }
 

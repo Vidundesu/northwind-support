@@ -151,6 +151,24 @@ and 40 tickets across every status, priority and SLA state.
 - Escalation history records the authenticated agent name from the JWT claims; the API and UI no longer accept an actor name supplied by the caller.
 - The optional SLA summary report is not implemented.
 
+### Task 3 — error contract and known limitations
+
+- **Error shape:** every failure is a JSON problem document with a `traceId`: `400` validation
+  (`errors` per field), `401` missing/invalid/expired token or bad login, `404` unknown ticket,
+  `409` Critical or Resolved/Closed escalation, `500` generic. A missing or invalid token also gets
+  this body (JwtBearer's default is an empty 401), so clients parse one error shape.
+- **Login failures:** wrong email, wrong password, inactive agent, blank fields and oversized
+  input (email over 254 or password over 128 characters) all return the same `401` and message.
+  An unknown email still does one password hash, so response time does not reveal which emails exist.
+  Blank fields are `401`, not `400`: the response must not hint which half was wrong.
+- **Escalation reason:** validated at the API edge by `EscalateTicketRequestValidator` (400 with a
+  `Reason` field error); the handler repeats the check so it is safe when called directly.
+- **Swagger:** an Authorize button accepts the token from `POST /api/auth/login`.
+- **Known limitations:** a token stays valid for up to 60 minutes after an agent is deactivated;
+  there is no concurrency token on tickets, so two simultaneous escalations of one ticket can both
+  succeed and write two history rows (a `rowversion` column and a `409` on conflict would fix it);
+  no refresh tokens, lockout or rate limiting, and no roles, as the assignment excludes them.
+
 ### Migration review
 
 Development startup currently applies migrations and seeds automatically. Do not start the API
